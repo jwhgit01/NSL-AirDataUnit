@@ -12,8 +12,9 @@
 #include <i2c_t3.h>
 
 /* Debugging Modes */
-#define DEBUG 		true
+#define DEBUG 		false
 #define DEBUG_TIME	true
+#define DEBUG_BYTES false
 
 /* Calibration Mode */
 #define CALIBRATION	false
@@ -76,6 +77,8 @@ float diff_press_Pa = 0.0f;
 float temp_C = 0.0f;
 float P_offset = 0.0f;
 uint16_t dP_int, alpha_int, beta_int;
+int ret = 0;
+bool collect_phase = false;
 //
 // Timing vars
 //
@@ -83,14 +86,11 @@ volatile long t0 = 0;
 volatile long t1 = 0;
 
 /**
- * @brief Read and interpret data from the airspeed (differential pressure) sensor
- * 
- * @return int Status:
- * 	-1 Critical error,
- * 	 0 Try again,
- *   1 Good data			
+ * @section Airspeed sensor function declarations
  */
-int readMS4525( float * diff_press_Pa, float * temp_C );
+int measure(void);
+int collect(void);
+int readMS4525(void);
 
 /**
  * @brief I2C slave requests
@@ -133,10 +133,10 @@ void setup() {
 	float calib_data = 0; 
 	int n = 100;
 	for (int i=0; i<n; i++) {
-		delay(1);
-		int status = readMS4525(&diff_press_Pa, &temp_C);
+		int status = readMS4525();
 		if (status < 1) {
 			n--;
+			delay(1);
 			continue;
 		}
 		calib_data = calib_data + diff_press_Pa;
@@ -183,18 +183,28 @@ void setup() {
  */
 void loop() {
 	//
+	// LED off
+	//
+	digitalWrite(LED_BUILTIN,LOW);
+	//
 	// The alpha and beta PWM readings are interrupt-driven
 	// and will be updated when there is data
 	//
-	// Read the differential pressure sensor
+	// Read data from the differential pressure sensor
 	//
-	int MS4525_status = readMS4525(&diff_press_Pa, &temp_C);
-	if (MS4525_status < 0) {
-		Serial.println("Something wrong");
+	int status = readMS4525();
+	if (status < 1) {
+		#if DEBUG
+			Serial.print("!");
+		#endif
+		return;
 	}
 	#if DEBUG
-		Serial.printf("dP = %0.3f, T_C = %0.3f, alpha_PWM = %d, beta_PWM = %d",
-				diff_press_Pa, temp_C, alpha_PWM, beta_PWM);
+		Serial.print("dP = "); // something buggy with prinf and floats
+		Serial.print(diff_press_Pa);
+		Serial.print(", T_C = ");
+		Serial.print(temp_C);
+		Serial.printf("alpha_PWM = %d, beta_PWM = %d \n", alpha_PWM, beta_PWM);
 	#endif
 	//
 	// Convert vane angles to degrees
@@ -202,7 +212,7 @@ void loop() {
 	float alpha_deg = m_alpha*alpha_PWM + b_alpha;
 	float beta_deg = m_beta*beta_PWM + b_beta;
 	//
-	// Convert data to 16-bit integers (is this the best way to do this?)
+	// Convert data to 16-bit integers
 	//
 	dP_int = static_cast<uint16_t>(diff_press_Pa*dP_scale);
 	alpha_int = static_cast<uint16_t>(alpha_deg*ab_scale);
@@ -216,14 +226,6 @@ void loop() {
 	TxBuffer[3] = alpha_int & 0xFF;
 	TxBuffer[4] = (beta_int >> 8)  & 0xFF;
 	TxBuffer[5] = beta_int & 0xFF;
-	#if DEBUG
-		Serial.print("bytes = | ");
-		for (int i=0; i<5; i++) { 
-			Serial.printf("%x", TxBuffer[i]);
-			Serial.print(" | ");
-		}
-		Serial.print("\n");
-	#endif
 	//
 	// If we've gotten here, there is an assembled packet and we're ready
 	// to send data as long as it has been requested.
@@ -240,20 +242,18 @@ void loop() {
 	#endif
 	//
 	// pause for timing and stability
+	// We're aiming for just faster than 100Hz
 	//
-    delayMicroseconds(600);
+    delayMicroseconds(9000);
+	return;
 }
 
 /**
- * @brief Read and interpret data from the airspeed (differential pressure) sensor
+ * @brief Measurement phase of the airspeed sensor
+ * 
+ * @return number of available bytes
  */
-int readMS4525( float * diff_press_Pa, float * temp_C ) {
-	
-	/**
-	 * @section Read the raw data from the I2C MS4525DO sensor
-	 * 
-	 * @link https://www.te.com/usa-en/product-CAT-BLPS0002.html
-	 */
+int measure(void) {
 	//
 	// write the start bit to access the first register
 	//
@@ -266,30 +266,43 @@ int readMS4525( float * diff_press_Pa, float * temp_C ) {
 	//
 	if (Wire1.getError()) {
 		Serial.println("Failed to request bytes from MS4525");
-		return 0;
+		return -1;
 	}
+	return numBytesAvail;
+}
+
+/**
+ * @brief Collection phase of the airspeed sensor
+ * 
+ * @return number of bytes read
+ * 
+ * @link https://www.te.com/usa-en/product-CAT-BLPS0002.html
+ * @link https://www.amsys-sensor.com/downloads/notes/I2C-Interface-to-Digital-Pressure-Sensors-AMSYS-an802e.pdf
+ * @link https://forum.arduino.cc/t/ms-4525do/298848/3
+ * @link https://github.com/PX4/PX4-Autopilot/blob/master/src/drivers/differential_pressure/ms4525/ms4525_airspeed.cpp
+ */
+int collect(void) {
+	//
+	// Read the requested bytes
+	//
 	int numBytesRead = Wire1.read(RxBuffer, NUM_BYTES_MS4525);
-	if (numBytesRead != NUM_BYTES_MS4525 || numBytesAvail != numBytesRead) {
-		Serial.print("Read wrong number of bytes: ");
-		return 0;
+	//
+	// Check for errors
+	//
+	if (numBytesRead != NUM_BYTES_MS4525) {
+		return numBytesRead;
 	}
 	if (Wire1.getError()) {
 		Serial.println("Failed to read bytes from MS4525");
-		return 0;
+		return -1;
 	}
-	
-	
-	/**
-	 * @section Interpret the raw data
-	 * 
-	 * @link https://www.amsys-sensor.com/downloads/notes/I2C-Interface-to-Digital-Pressure-Sensors-AMSYS-an802e.pdf
-	 * @link https://forum.arduino.cc/t/ms-4525do/298848/3
-	 * @link https://github.com/PX4/PX4-Autopilot/blob/master/src/drivers/differential_pressure/ms4525/ms4525_airspeed.cpp
-	 */
 	//
 	// Check the status bits (2 MSB of Output Data Packet)
 	//
 	uint8_t status = (RxBuffer[0] & 0xC0) >> 6;
+	#if DEBUG_BYTES
+		Serial.printf("Status = %d\n", status);
+	#endif
 	switch (status) {
 	case 0: // Normal Operation. Good Data Packet
 		break;
@@ -300,6 +313,17 @@ int readMS4525( float * diff_press_Pa, float * temp_C ) {
 	case 3: // Fault Detected
 		return -1;
 	}
+	#if DEBUG_BYTES
+		//
+		// print the raw buffer
+		//
+		Serial.print("MS4525 buffer: | ");
+		for (int i=0; i<NUM_BYTES_MS4525; i++) {
+			Serial.print(RxBuffer[i]);
+			Serial.print(" | ");
+		}
+		Serial.print("\n");
+	#endif
 	//
 	// Do some bit math to get data from the buffer
 	//
@@ -308,6 +332,9 @@ int readMS4525( float * diff_press_Pa, float * temp_C ) {
 	dp_raw = 0x3FFF & dp_raw; // mask the used bits
 	dT_raw = (RxBuffer[2] << 8) | RxBuffer[3];
 	dT_raw = (0xFFE0 & dT_raw) >> 5;
+	#if DEBUG_BYTES
+		Serial.printf("dp_raw = %d, dT_raw = %d \n", dp_raw, dT_raw);
+	#endif
 	//
 	// A max dT is almost certainly an invalid reading
 	//
@@ -317,7 +344,7 @@ int readMS4525( float * diff_press_Pa, float * temp_C ) {
 	//
 	// Temperature in Celcius
 	//
-	*temp_C = ((200.0f * dT_raw) / 2047) - 50;
+	temp_C = ((200.0f * dT_raw) / 2047) - 50;
 	//
 	// Calculate differential pressure. It's centered about 8000
 	// and can be positive or negative
@@ -333,10 +360,59 @@ int readMS4525( float * diff_press_Pa, float * temp_C ) {
 	  port on the pitot and top port is used as the dynamic port
 	 */
 	float diff_press_PSI = -((dp_raw - 0.1f * 16383) * (P_max - P_min) / (0.8f * 16383) + P_min);
-	*diff_press_Pa = (diff_press_PSI * PSI_to_Pa) - P_offset;
+	diff_press_Pa = (diff_press_PSI * PSI_to_Pa) - P_offset;
 	//
 	// We got a good packet of data!
 	//
+	return numBytesRead;
+}
+
+/**
+ * @brief Read from the airspeed sensor
+ * 
+ * @return status:
+ * 			0 - Try again
+ * 			1 - Good data
+ */
+int readMS4525(void) {
+	//
+	// set the buffer to zero
+	//
+	memset(RxBuffer, 0, NUM_BYTES_MS4525);
+	//
+	// collection phase
+	//
+	if (collect_phase) {
+		//
+		// perform collection
+		//
+		ret = collect();
+		delayMicroseconds(100);
+		if (ret < NUM_BYTES_MS4525) {
+			//
+			// restart the measurement state machine
+			//
+			collect_phase = false;
+			return 0;
+		}
+		//
+		// next phase is measurement
+		//
+		collect_phase = false;
+	}
+	//
+	// measurement phase
+	//
+	ret = measure();
+	delayMicroseconds(100);
+	if (ret < NUM_BYTES_MS4525) {
+		Serial.print("Measure error");
+		return 0;
+	}
+	// 
+	// next phase is collection
+	//
+	collect_phase = true;
 	return 1;
 }
 
@@ -348,7 +424,19 @@ void requestEvent(void) {
 	// if the command was to send data, send it out!
 	//
 	if (ready) {
-		Wire.write(TxBuffer,NUM_BYTES_OUT);\
+		Wire.write(TxBuffer,NUM_BYTES_OUT);
+		#if DEBUG
+			Serial.print("bytes = | ");
+			for (int i=0; i<5; i++) { 
+				Serial.printf("%x", TxBuffer[i]);
+				Serial.print(" | ");
+			}
+			Serial.print("\n");
+		#endif
+		//
+		// LED on
+		//
+		digitalWrite(LED_BUILTIN,HIGH);
 		//
 		// Get Wire Error - returns "Wire" error code from a failed Tx/Rx command
 		// 0=success, 1=data too long, 2=recv addr NACK, 3=recv data NACK, 4=other error (timeout, arb lost)
