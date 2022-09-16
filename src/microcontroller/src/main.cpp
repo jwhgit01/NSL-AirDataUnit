@@ -85,7 +85,6 @@ void setup() {
 	//
 	// Setup for ADU in slave mode, address 0x4F, pins 18/19, external pullups, 400kHz
 	//
-	ready = 0;
 	memset(TxBuffer, 0, NUM_BYTES_OUT);
     Wire.begin(I2C_SLAVE, I2C_ADDRESS_ADU, ADU_PINS, I2C_PULLUP_EXT, 400000);
     //
@@ -130,8 +129,6 @@ void setup() {
 		Serial.println("###############");
 		delay(10000);
 	#endif
-	//
-	ready = 1;
 }
 
 /**
@@ -179,9 +176,8 @@ void loop() {
 	#endif
 	//
 	// pause for timing and stability
-	// We're aiming for about 100Hz
 	//
-    delayMicroseconds(910);
+    delayMicroseconds(4900);
 	return;
 }
 
@@ -189,10 +185,7 @@ void loop() {
  * @brief handle Tx Event (outgoing I2C data)
  */
 void requestEvent(void) {
-	//
-	// if the command was to send data, send it out!
-	//
-	if (ready) {
+
 		Wire.write(TxBuffer,NUM_BYTES_OUT);
 		#if DEBUG
 			Serial.print("bytes = | ");
@@ -218,7 +211,6 @@ void requestEvent(void) {
 		#if DEBUG_TIME
 			Serial.println(".");
 		#endif
-	}
 }
 
 /**

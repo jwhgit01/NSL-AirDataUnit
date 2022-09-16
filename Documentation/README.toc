@@ -1,0 +1,17 @@
+\contentsline {section}{\numberline {1}Construction}{2}{}%
+\contentsline {subsection}{\numberline {1.1}Bill of Materials}{2}{}%
+\contentsline {subsection}{\numberline {1.2}Electrical Specifications}{2}{}%
+\contentsline {subsection}{\numberline {1.3}Build Instructions}{2}{}%
+\contentsline {subsection}{\numberline {1.4}PX4 Integration}{2}{}%
+\contentsline {section}{\numberline {2}User Guide}{2}{}%
+\contentsline {subsection}{\numberline {2.1}Mounting Considerations}{2}{}%
+\contentsline {subsection}{\numberline {2.2}Data Analysis}{2}{}%
+\contentsline {subsection}{\numberline {2.3}Research Efforts}{2}{}%
+\contentsline {section}{\numberline {A}Source Code}{2}{}%
+\contentsline {subsection}{\numberline {A.1}microcontroller code}{2}{}%
+\contentsline {subsection}{\numberline {A.2}PX4 code}{2}{}%
+\contentsline {section}{\numberline {B}Engineering Drawings}{2}{}%
+\contentsline {subsection}{\numberline {B.1}Kiel Probe}{2}{}%
+\contentsline {subsection}{\numberline {B.2}Vane}{2}{}%
+\contentsline {subsection}{\numberline {B.3}Calibration Fixture}{2}{}%
+\contentsline {subsection}{\numberline {B.4}Hose Guide}{2}{}%
