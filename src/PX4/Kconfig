@@ -1,5 +1,0 @@
-menuconfig DRIVERS_NSL_ADU
-	bool "nsl_adu"
-	default n
-	---help---
-		Enable support for NSL air data unit
