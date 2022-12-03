@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use any of this material, please cite it as below."
+authors:
+- family-names: "Hopwood"
+  given-names: "Jeremy"
+  orcid: "https://orcid.org/0000-0003-3708-137X"
+title: "Small, Attritable Vaned Air Data Unit"
+version: 0.1
+date-released: 2022-12-03
+url: "https://github.com/jwhgit01/NSL-AirDataUnit"
