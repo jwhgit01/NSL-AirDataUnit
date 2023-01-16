@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use any of this material, please cite it as below."
 authors:
 - family-names: "Hopwood"
-  given-names: "Jeremy"
+  given-names: "Jeremy W."
   orcid: "https://orcid.org/0000-0003-3708-137X"
 title: "Small, Attritable Vaned Air Data Unit"
 version: 0.1

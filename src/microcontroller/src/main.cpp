@@ -23,13 +23,13 @@
 #define I2C_ADDRESS_ADU 0x4F
 #define READ_CMD 0x00
 
-/* Number of bytes sent */
-#define NUM_BYTES_OUT 4
-
 /* Teensy LC Pins */
 #define ALPHA_PIN 3
 #define BETA_PIN  4
 #define ADU_PINS I2C_PINS_18_19
+
+/* Threshold for invalid readings */
+#define THRESHOLD 250
 
 /**
  * @section Declarations
@@ -58,10 +58,18 @@ volatile int beta_PWM = 0;
 volatile int alpha_prev_time = 0;
 volatile int beta_prev_time = 0;
 //
+// Previous readings fron removing outliers
+//
+volatile int alpha_prev_PWM = -1;
+volatile int beta_prev_PWM = -1;
+volatile bool alpha_OK = false;
+volatile bool beta_OK = false;
+volatile int alpha_err_counter = 0;
+volatile int beta_err_counter = 0;
+//
 // I2C slave
 //
-volatile uint8_t ready;
-uint8_t TxBuffer[NUM_BYTES_OUT] = {0};
+uint8_t TxBuffer[8] = {0};
 //
 // Timing vars
 //
@@ -140,8 +148,18 @@ void loop() {
 	//
 	digitalWrite(LED_BUILTIN,LOW);
 	//
-	// The alpha and beta PWM readings are interrupt-driven
-	// and will be updated when there is data
+	// The alpha and beta PWM readings are interrupt-driven and will be
+	// updated when there is data. However, make sure the reading is good.
+	//
+	if (!alpha_OK && !beta_OK) {
+		#if DEBUG
+			Serial.print("alpha_OK = ");
+			Serial.print(alpha_OK);
+			Serial.print(", beta_OK = ");
+			Serial.println(beta_OK);
+		#endif
+		return
+	}
 	//
 	// Convert vane angles to degrees
 	//
@@ -154,17 +172,28 @@ void loop() {
 		Serial.println(beta_deg);
 	#endif
 	//
-	// Convert data to 16-bit integers
+	// Convert data to 16-bit integers (OLD)
 	//
-	uint16_t alpha_int = static_cast<uint16_t>(alpha_deg*ab_scale);
-	uint16_t beta_int = static_cast<uint16_t>(beta_deg*ab_scale);
+	// uint16_t alpha_int = static_cast<uint16_t>(alpha_deg*ab_scale);
+	// uint16_t beta_int = static_cast<uint16_t>(beta_deg*ab_scale);
 	//
 	// Put data into a big-endian array of bytes
 	//
-	TxBuffer[0] = (alpha_int >> 8) & 0xFF;
-	TxBuffer[1] = alpha_int & 0xFF;
-	TxBuffer[2] = (beta_int >> 8)  & 0xFF;
-	TxBuffer[3] = beta_int & 0xFF;
+	// TxBuffer[0] = (alpha_int >> 8) & 0xFF;
+	// TxBuffer[1] = alpha_int & 0xFF;
+	// TxBuffer[2] = (beta_int >> 8)  & 0xFF;
+	// TxBuffer[3] = beta_int & 0xFF;
+	//
+	// Put data into an array of bytes.
+	//
+	memcpy(TxBuffer, &alpha_deg, 4);
+	memcpy(TxBuffer+4, &beta_deg, 4);
+	/* To re-assemble in a driver, do the following:
+	 * float alpha, beta;
+	 * memcpy(&alpha, RxBuffer, 4);
+	 * memcpy(&beta, RxBuffer+4, 4);
+	 * However, make sure 
+	 */
 	//
 	// debug timing
 	//
@@ -207,7 +236,8 @@ void requestEvent(void) {
 		if (TxError > 0){
 			Serial.print(TxError);
 		}
-		ready = 0;
+		alpha_OK = false;
+		beta_OK = false;
 		#if DEBUG_TIME
 			Serial.println(".");
 		#endif
@@ -228,8 +258,36 @@ void beta_rising() {
 void alpha_falling() {
 	attachInterrupt(ALPHA_PIN, alpha_rising, RISING);
 	alpha_PWM = micros()-alpha_prev_time;
+
+	// Error checking
+	if (alpha_prev_PWM < 0 || alpha_err_counter > 2) {
+		alpha_prev_PWM = alpha_PWM;
+		alpha_OK = true;
+		alpha_err_counter = 0;
+	} else if abs(alpha_PWM-alpha_prev_PWM) > THRESHOLD {
+		alpha_OK = false;
+		alpha_err_counter++;
+	} else {
+		alpha_prev_PWM = alpha_PWM;
+		alpha_OK = true;
+		alpha_err_counter = 0;
+	}
 }
 void beta_falling() {
 	attachInterrupt(BETA_PIN, beta_rising, RISING);
 	beta_PWM = micros()-beta_prev_time;
+
+	// Error checking
+	if (beta_prev_PWM < 0 || beta_err_counter > 2){
+		beta_prev_PWM = beta_PWM;
+		beta_OK = true;
+		beta_err_counter = 0;
+	} else if (abs(beta_PWM-beta_prev_PWM) > THRESHOLD) {
+		beta_OK = false;
+		beta_err_counter++;
+	} else {
+		beta_prev_PWM = beta_PWM;
+		beta_OK = true;
+		beta_err_counter = 0;
+	}
 }
